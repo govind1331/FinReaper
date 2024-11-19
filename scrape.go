@@ -1,65 +1,112 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"log"
-	"net/http"
+	"time"
 
-	"github.com/gocolly/colly"
+	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 )
 
-type pageInfo struct {
-	StatusCode int
-	Links      map[string]int
-}
+// type pageInfo struct {
+// 	StatusCode int
+// 	Links      map[string]int
+// }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-
-	URL := r.URL.Query().Get("url")
-	if URL == "" {
-		log.Println("missing URL argument")
-		return
-	}
-	log.Println("visiting URL")
-
-	c := colly.NewCollector()
-
-	p := &pageInfo{Links: make(map[string]int)}
-
-	//count links
-	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		link := e.Request.AbsoluteURL(e.Attr("href"))
-		if link != "" {
-			p.Links[link]++
-		}
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		log.Println("error:", r.StatusCode, err)
-		p.StatusCode = r.StatusCode
-	})
-
-	c.Visit(URL)
-
-	//dump results
-	b, err := json.Marshal(p)
-
-	if err != nil {
-		log.Println("Failed to serialize response:", err)
-		return
-	}
-
-	w.Header().Add("Content-Type", "application/json")
-	w.Write(b)
-
-}
+// type scrapeData struct {
+// 	TextBlob blobstore
+// 	Symb string
+// }
 
 func main() {
-	// example usage: curl -s 'http://127.0.0.1:7171/?url=http://go-colly.org/'
-	addr := ":7171"
 
-	http.HandleFunc("/", handler)
+	// Create context with more options for stability
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("disable-web-security", true),
+		chromedp.Flag("disable-background-networking", false),
+		chromedp.Flag("enable-automation", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("headless", false), // Run in visible mode
+		chromedp.WindowSize(800, 800),    // Set window size
+	)
 
-	log.Println("listening on", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
+	// Create browser context
+	ctx, cancel := chromedp.NewContext(allocCtx,
+		chromedp.WithLogf(log.Printf), // Enable logging
+	)
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	selector := `input[placeholder="Search for news, symbols or companies"]`
+	selector_2 := `a[title="View more"]`
+
+	// Run with better error handling and logging
+	err := chromedp.Run(ctx,
+		// Navigate to the page
+		chromedp.Navigate("https://finance.yahoo.com"),
+
+		// Wait for body to be ready
+		chromedp.WaitReady("body"),
+
+		// Add a small delay to ensure page is loaded
+		chromedp.Sleep(2*time.Second),
+
+		// Log before attempting to find element
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Println("Waiting for search box to become visible...")
+			return nil
+		}),
+
+		// Wait for the search box
+		chromedp.WaitVisible(selector),
+
+		// Log before clicking
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Println("Attempting to click search box...")
+			return nil
+		}),
+
+		// Click the search box
+		chromedp.Click(selector),
+
+		// Ensure element is focused
+		chromedp.Focus(selector),
+
+		// Type with small delay between keystrokes
+		chromedp.SendKeys(selector, "apple"),
+
+		// Small delay before pressing Enter
+		chromedp.Sleep(500*time.Millisecond),
+
+		// Press Enter key
+		chromedp.SendKeys(selector, kb.Enter),
+		// --------------------------------------------------------------------------------------------------------------
+		// Wait to see results
+		chromedp.Sleep(10*time.Second),
+
+		// Wait for body to be ready
+		// chromedp.WaitReady("body"),
+
+		// Wait for the search box
+		chromedp.WaitVisible(selector_2),
+
+		// Click the search box
+		chromedp.Click(selector_2),
+
+		// Wait to see results
+		chromedp.Sleep(10*time.Second),
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Search completed successfully")
+
 }
